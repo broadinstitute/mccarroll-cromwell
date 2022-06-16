@@ -1,0 +1,4 @@
+[submodule "cromwell"]
+	path = cromwell
+	url = git@github.com:broadinstitute/cromwell.git
+	branch = ks_sfs_melange
