@@ -35,6 +35,13 @@ root_dir=$(pwd)
 cromwell_jar="${root_dir}/bin/cromwell.jar"
 cromwell_conf="${root_dir}/conf/cromwell.conf"
 
+# Add Google-Cloud-SDK for docker-credential-gcloud.
+set +eu
+source /broad/software/scripts/useuse
+unuse -q Google-Cloud-SDK
+use -q Google-Cloud-SDK
+set -eu
+
 # Install SDKMAN via:
 #   - https://sdkman.io/install
 #   - export SDKMAN_DIR="<your_directory>" && curl -s "https://get.sdkman.io" | bash
