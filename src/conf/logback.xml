@@ -1,0 +1,115 @@
+<!--
+MIT License
+
+Copyright 2022 Broad Institute
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Logging customizations for the mccarroll-cromwell instance.
+
+Captures verbose logs in a separate file that can be analyzed as necessary but are automatically
+deleted after a period of time.
+-->
+<configuration>
+
+  <conversionRule
+    conversionWord="et"
+    converterClass="cromwell.core.logging.EnhancedThreadConverter"
+  />
+  <conversionRule
+    conversionWord="ed"
+    converterClass="cromwell.core.logging.EnhancedDateConverter"
+  />
+
+  <property
+    name="cromwell.log.pattern"
+    value="%ed{yyyy-MM-dd HH:mm:ss.SSS} [%et] %-5level %logger{35} - %msg%n"
+  />
+
+  <property name="cromwell.log.dir" value="log"/>
+  <property name="cromwell.log.file" value="cromwell.log"/>
+  <property name="cromwell.verbose.file" value="verbose.log"/>
+  <property name="cromwell.rolling.prefix" value="%d{yyyyMMdd}"/>
+
+  <property
+    name="cromwell.verbose.expression"
+    value='
+          if (level == WARN) {
+            if (formattedMessage.startsWith("Illegal request, ")) {
+              return true;
+            }
+            if (formattedMessage.startsWith("Illegal header: ")) {
+              return true;
+            }
+          }
+          if (level == INFO) {
+            if (formattedMessage.startsWith("DispatchedConfigAsyncJobExecutionActor ")) {
+              if (formattedMessage.contains("executing: /broad/mccarroll/software/cromwell/bin/check_uger.sh")) {
+                return true;
+              }
+            }
+          }
+          return false;
+         '
+  />
+
+  <appender name="DEFAULT_APPENDER" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+      <evaluator>
+        <expression>${cromwell.verbose.expression}</expression>
+      </evaluator>
+      <OnMismatch>NEUTRAL</OnMismatch>
+      <OnMatch>DENY</OnMatch>
+    </filter>
+    <file>${cromwell.log.dir}/${cromwell.log.file}</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>${cromwell.log.dir}/${cromwell.rolling.prefix}-${cromwell.log.file}
+      </fileNamePattern>
+    </rollingPolicy>
+    <encoder>
+      <pattern>${cromwell.log.pattern}</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="VERBOSE_APPENDER" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+      <evaluator>
+        <expression>${cromwell.verbose.expression}</expression>
+      </evaluator>
+      <OnMismatch>DENY</OnMismatch>
+      <OnMatch>NEUTRAL</OnMatch>
+    </filter>
+    <file>${cromwell.log.dir}/${cromwell.verbose.file}</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>${cromwell.log.dir}/${cromwell.rolling.prefix}-${cromwell.verbose.file}
+      </fileNamePattern>
+      <maxHistory>30</maxHistory>
+      <totalSizeCap>2GB</totalSizeCap>
+    </rollingPolicy>
+    <encoder>
+      <pattern>${cromwell.log.pattern}</pattern>
+    </encoder>
+  </appender>
+
+  <root level="${LOG_LEVEL}">
+    <appender-ref ref="DEFAULT_APPENDER"/>
+    <appender-ref ref="VERBOSE_APPENDER"/>
+  </root>
+
+</configuration>

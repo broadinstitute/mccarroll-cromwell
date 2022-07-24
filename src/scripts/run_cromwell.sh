@@ -34,6 +34,14 @@ cd "$(dirname "$0")/.."
 root_dir=$(pwd)
 cromwell_jar="${root_dir}/bin/cromwell.jar"
 cromwell_conf="${root_dir}/conf/cromwell.conf"
+logback_xml="${root_dir}/conf/logback.xml"
+
+# Add Google-Cloud-SDK for docker-credential-gcloud.
+set +eu
+source /broad/software/scripts/useuse
+unuse -q Google-Cloud-SDK
+use -q Google-Cloud-SDK
+set -eu
 
 # Install SDKMAN via:
 #   - https://sdkman.io/install
@@ -50,6 +58,7 @@ set -x
 java \
   -Xmx2g \
   -Dconfig.file="$cromwell_conf" \
+  -Dlogback.configurationFile="$logback_xml" \
   -jar "$cromwell_jar" \
   server &
 set +x
