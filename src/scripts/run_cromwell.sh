@@ -37,17 +37,13 @@ cromwell_conf="${root_dir}/conf/cromwell.conf"
 logback_xml="${root_dir}/conf/logback.xml"
 
 # Add Google-Cloud-SDK for docker-credential-gcloud.
+# Add UGER for qsub.
 set +eu
 source /broad/software/scripts/useuse
 unuse -q Google-Cloud-SDK
+unuse -q UGER
 use -q Google-Cloud-SDK
-set -eu
-
-# Add Google-Cloud-SDK for docker-credential-gcloud.
-set +eu
-source /broad/software/scripts/useuse
-unuse -q Google-Cloud-SDK
-use -q Google-Cloud-SDK
+use -q UGER
 set -eu
 
 # Install SDKMAN via:
