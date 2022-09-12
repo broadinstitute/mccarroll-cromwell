@@ -24,6 +24,9 @@
 
 # Runs an instance of gost as an HTTPS termination endpoint for Cromwell.
 #   - https://github.com/ginuerzh/gost
+#
+# Download gost-linux-amd64 from https://github.com/ginuerzh/gost/releases
+# TLS certificate obtained via https://broad.io/ssl
 
 set -euo pipefail
 
@@ -35,7 +38,6 @@ key_file="${root_dir}/conf/${HOSTNAME}.key"
 
 mkdir -p "${root_dir}/log"
 
-# Download from https://github.com/ginuerzh/gost/releases/tag/v2.11.2
 "${root_dir}/bin/gost" \
   -L "tls://:8443/localhost:8000?cert=${cert_file}&key=${key_file}" \
 >>"$https_log" \
