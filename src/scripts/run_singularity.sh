@@ -31,18 +31,21 @@ set -euo pipefail
 progname=$(basename "$0")
 singularity_args=
 singularity_binds=
-cache_dir=/broad/hptmp/$USER
+cache_dir=/broad/hptmp/$USER/singularity
+log_label_raw="$USER@$HOSTNAME"
 bind_autofs=false
+lock_timeout=3600
 
 usage() {
     cat >&2 <<EOF
 USAGE: $progname [-c cache_dir] [-a] [-b singularity_mount] [-S singularity_arguments] docker_image docker_command [container_args...]
 Run a singularity container
 
--c <cache_dir>         : Directory to cache downloaded docker images. Default: /broad/hptmp/$USER.
+-c <cache_dir>         : Directory to cache downloaded docker images. Default: /broad/hptmp/$USER/singularity.
 -a                     : Mount all existing autofs mounts into the container.
 -b <singularity_mount> : Custom bind path spec in the format src[:dest[:opts]].
 -s <singularity_args>  : A space separated string of arguments to pass to singularity. Default: "".
+-l <log_label>         : A label to use for logging. Default: "$USER@$HOSTNAME".
 <docker_image>         : Hosted docker image to execute. Required.
 <docker_command>       : Command to run on the docker image. Required.
 <container_args>       : Additional arguments to pass to the singularity container.
@@ -55,12 +58,13 @@ make_autofs_binds() {
   mount | grep ^auto. | grep -v 'auto.home on /home' | awk '{print "--bind "$3":"$3":ro"}'
 }
 
-while getopts ":c:ab:s:h" options; do
+while getopts ":c:ab:s:l:h" options; do
   case $options in
     a) bind_autofs=true;;
     b) singularity_binds="$singularity_binds --bind $OPTARG";;
     c) cache_dir=$OPTARG;;
     s) singularity_args=$OPTARG;;
+    l) log_label_raw=$OPTARG;;
     h) usage
       exit 1;;
     *) usage
@@ -68,6 +72,8 @@ while getopts ":c:ab:s:h" options; do
   esac
 done
 shift $((OPTIND - 1))
+
+log_label=$(eval echo "$log_label_raw")
 
 docker_image=${1:-}
 if [ -z "$docker_image" ]; then
@@ -95,17 +101,32 @@ docker_name=${docker_image//[^A-Za-z0-9._-]/_}
 
 export SINGULARITY_CACHEDIR=$cache_dir
 export SINGULARITY_TMPDIR="$cache_dir/tmp"
+build_log="$SINGULARITY_CACHEDIR/build.log"
+
+log_msg() {
+  printf '%s\n' "$1" >> "$build_log"
+  printf '%s\n' "$1" >&2
+}
 
 mkdir -p "$SINGULARITY_TMPDIR"
 
 singularity_image=$cache_dir/$docker_name.sif
-(
-  flock --exclusive --timeout 3600 9 || exit 1
-  if [ ! -e "$singularity_image" ]; then
-    echo "INFO:    Image does not exist: $singularity_image..." >&2
-    singularity build "$singularity_image" "docker://${docker_image}"
-  fi
-) 9>"$lock_file"
+if [ ! -e "$singularity_image" ]; then
+  log_msg "INFO:    Image does not exist for $log_label at $(date): $singularity_image"
+  log_msg "INFO:    Waiting up to $lock_timeout seconds for shared lock: $lock_file"
+  log_msg "INFO:    View build logs at $build_log"
+  (
+      flock --exclusive --timeout "$lock_timeout" 9 || exit 1
+      log_msg "INFO:    Lock acquired at $(date) for $log_label"
+      if [ ! -e "$singularity_image" ]; then
+        log_msg "INFO:    Building image for $log_label: $singularity_image"
+        singularity build "$singularity_image.tmp" "docker://${docker_image}" >> "$build_log" 2>&1
+        mv "$singularity_image.tmp" "$singularity_image"
+      else
+        log_msg "INFO:    Image now exists for $log_label: $singularity_image"
+      fi
+  ) 9>"$lock_file"
+fi
 
 # shellcheck disable=SC2046
 # shellcheck disable=SC2086
