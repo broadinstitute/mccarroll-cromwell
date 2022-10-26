@@ -40,10 +40,11 @@ singularity_binds=
 cache_dir=$default_cache_dir
 log_label_raw=$default_log_label_raw
 lock_timeout=$default_lock_timeout
+force_build=false
 
 usage() {
     cat >&2 <<EOF
-USAGE: $progname [-c cache_dir] [-a] [-b singularity_mount] [-S singularity_arguments] docker_image docker_command [container_args...]
+USAGE: $progname [-c cache_dir] [-a] [-b singularity_mount] [-s singularity_arguments] [-l log_label] [-t lock_timeout] [-f] docker_image docker_command [container_args...]
 Run a singularity container
 
 -c <cache_dir>         : Directory to cache downloaded docker images. Default: $default_cache_dir.
@@ -52,6 +53,7 @@ Run a singularity container
 -s <singularity_args>  : A space separated string of arguments to pass to singularity. Default: "".
 -l <log_label>         : A label to use for logging. Default: "$default_log_label_raw".
 -t <lock_timeout>      : Timeout in seconds for acquiring a lock on the cache directory. Default: $default_lock_timeout.
+-f                     : Force a rebuild of the container.
 <docker_image>         : Hosted docker image to execute. Required.
 <docker_command>       : Command to run on the docker image. Required.
 <container_args>       : Additional arguments to pass to the singularity container.
@@ -67,7 +69,7 @@ make_autofs_binds() {
   | awk '{print "--bind "$1":"$1":ro"}'
 }
 
-while getopts ":c:ab:s:l:t:h" options; do
+while getopts ":c:ab:s:l:t:fh" options; do
   case $options in
     a) bind_autofs=true;;
     b) singularity_binds="$singularity_binds --bind $OPTARG";;
@@ -75,6 +77,7 @@ while getopts ":c:ab:s:l:t:h" options; do
     s) singularity_args=$OPTARG;;
     l) log_label_raw=$OPTARG;;
     t) lock_timeout=$OPTARG;;
+    f) force_build=true;;
     h) usage; exit 1;;
     *) usage; exit 1;;
   esac
@@ -84,7 +87,7 @@ shift $((OPTIND - 1))
 log_label=$(eval echo "$log_label_raw")
 
 docker_image=${1:-}
-if [ -z "$docker_image" ]; then
+if [[ -z "$docker_image" ]]; then
     echo "No docker_image supplied." >&2
     usage
     exit 1
@@ -92,14 +95,14 @@ fi
 shift
 
 docker_command=${1:-}
-if [ -z "$docker_command" ]; then
+if [[ -z "$docker_command" ]]; then
     echo "No docker_command supplied." >&2
     usage
     exit 1
 fi
 shift
 
-mkdir -p "$cache_dir"
+mkdir -p "$cache_dir/tmp"
 
 # Create a lock file for pulling images
 lock_file=$cache_dir/singularity_pull_flock
@@ -107,32 +110,75 @@ lock_file=$cache_dir/singularity_pull_flock
 # Change non alpha-numeric-ish characters to underscores
 docker_name=${docker_image//[^A-Za-z0-9._-]/_}
 
-export SINGULARITY_CACHEDIR=$cache_dir
-export SINGULARITY_TMPDIR="$cache_dir/tmp"
-build_log="$SINGULARITY_CACHEDIR/build.log"
+# Write the build logs to a shared file
+build_log="$cache_dir/build.log"
+
+if [[ $(realpath "$(which singularity)") == */apptainer ]]; then
+  # Apptainer emits warnings if it finds the SINGULARITY_TMPDIR variable.
+  export APPTAINER_CACHEDIR=$cache_dir
+  export APPTAINER_TMPDIR=$cache_dir/tmp
+  export SINGULARITY_CACHEDIR=$cache_dir
+else
+  export SINGULARITY_CACHEDIR=$cache_dir
+  export SINGULARITY_TMPDIR=$cache_dir/tmp
+fi
 
 log_msg() {
   printf '%s\n' "$1" >> "$build_log"
   printf '%s\n' "$1" >&2
 }
 
-mkdir -p "$SINGULARITY_TMPDIR"
-
-singularity_image=$cache_dir/$docker_name.sif
-if [ ! -e "$singularity_image" ]; then
-  log_msg "INFO:    Image does not exist for $log_label at $(date): $singularity_image"
-  log_msg "INFO:    Waiting up to $lock_timeout seconds for shared lock: $lock_file"
-  log_msg "INFO:    View build logs at $build_log"
+pull_image() {
+  log_msg "INFO:    $log_label waiting for lock up to $lock_timeout seconds from $(date)"
+  printf "INFO:    View build logs at %s\n" "$build_log" >&2
   (
       flock --exclusive --timeout "$lock_timeout" 9 || exit 1
-      log_msg "INFO:    Lock acquired at $(date) for $log_label"
-      if [ ! -e "$singularity_image" ]; then
-        log_msg "INFO:    Building image for $log_label: $singularity_image"
-        singularity build "$singularity_image.tmp" "docker://${docker_image}" >> "$build_log" 2>&1
+      log_msg "INFO:    $log_label acquired lock at $(date)"
+      if [[ ! -e "$singularity_image" ]] || [[ "$force_build" = true ]]; then
+        log_msg "INFO:    $log_label building image: $singularity_image"
+
+        # Use retries to avoid transient errors such as:
+        # ```
+        # FATAL:   While performing build: while creating squashfs: create command failed:
+        # exit status 1: writer: Lseek on destination failed because Bad file descriptor,
+        # offset=0x1c45bd7
+        # FATAL ERROR:Probably out of space on output filesystem
+        # ```
+        attempts=3
+        for attempt in $(seq 1 $attempts); do
+
+          set +e
+          singularity build --force "$singularity_image.tmp" "docker://${docker_image}" \
+            >> "$build_log" 2>&1
+          rc=$?
+          set -e
+
+          if [[ $rc -eq 0 ]]; then
+            exit $rc
+          fi
+
+          error_prefix="ERROR:   $log_label failed build during attempt $attempt at $(date)"
+          if [[ $attempt -lt $attempts ]]; then
+            log_msg "$error_prefix ... Retrying."
+          else
+            log_msg "$error_prefix ... Giving up."
+            exit $rc
+          fi
+
+        done
+
         mv "$singularity_image.tmp" "$singularity_image"
       fi
-      log_msg "INFO:    Image now exists for $log_label: $singularity_image"
   ) 9>"$lock_file"
+  log_msg "INFO:    Image now exists for $log_label at $(date): $singularity_image"
+}
+
+singularity_image=$cache_dir/$docker_name.sif
+if [[ ! -e "$singularity_image" ]]; then
+  log_msg "INFO:    Image does not exist for $log_label at $(date): $singularity_image"
+  pull_image
+elif [[ "$force_build" = true ]]; then
+  pull_image
 fi
 
 # shellcheck disable=SC2046
