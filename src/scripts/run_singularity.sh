@@ -132,7 +132,7 @@ pull_image() {
   log_msg "INFO:    $log_label waiting for lock up to $lock_timeout seconds from $(date)"
   printf "INFO:    View build logs at %s\n" "$build_log" >&2
   (
-      flock --exclusive --timeout "$lock_timeout" 9 || exit 1
+      flock --exclusive --timeout "$lock_timeout" 9
       log_msg "INFO:    $log_label acquired lock at $(date)"
       if [[ ! -e "$singularity_image" ]] || [[ "$force_build" = true ]]; then
         log_msg "INFO:    $log_label building image: $singularity_image"
@@ -154,7 +154,7 @@ pull_image() {
           set -e
 
           if [[ $rc -eq 0 ]]; then
-            exit $rc
+            break
           fi
 
           error_prefix="ERROR:   $log_label failed build during attempt $attempt at $(date)"
