@@ -50,7 +50,8 @@ get_default_cache_dir() {
 
 default_cache_dir=$(get_default_cache_dir)
 default_log_label_raw="$USER@$HOSTNAME"
-default_lock_timeout=$((90 * 60))
+# Very  large images take a long time to convert from docker to singularity.
+default_lock_timeout=$((180 * 60))
 
 singularity_image=
 cache_dir=$default_cache_dir
