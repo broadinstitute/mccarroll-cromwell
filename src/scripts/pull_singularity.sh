@@ -30,41 +30,41 @@ set -euo pipefail
 
 progname=$(basename "${BASH_SOURCE[0]}")
 
-default_cache_dir_user="/broad/hptmp/$USER/singularity"
-default_cache_dir_dropseqgrp="/broad/mccarroll/software/singularity"
+default_singularity_dir_user="/broad/hptmp/$USER/singularity"
+default_singularity_dir_dropseqgrp="/broad/mccarroll/software/singularity"
 
 # For folks in the dropseqgrp, cache the images in a shared location.
 # Otherwise, cache them in a user-specific location.
 # Known race condition: if two users build the same image at the same time, the
 # second user will overwrite the first user's image possibly while the first user
 # is still using it.
-get_default_cache_dir() {
+get_default_singularity_dir() {
   # Ignore errors from "groups" due to the grid engine group id.
   # https://github.com/rcgsheffield/sheffield_hpc/issues/686
   if { groups 2>/dev/null || true ; } | tr ' ' '\n' | grep -Fxq dropseqgrp; then
-    echo "$default_cache_dir_dropseqgrp"
+    echo "$default_singularity_dir_dropseqgrp"
   else
-    echo "$default_cache_dir_user"
+    echo "$default_singularity_dir_user"
   fi
 }
 
-default_cache_dir=$(get_default_cache_dir)
+default_singularity_dir=$(get_default_singularity_dir)
 default_log_label_raw="$USER@$HOSTNAME"
 default_lock_timeout=$((90 * 60))
 
 singularity_image=
-cache_dir=$default_cache_dir
+singularity_dir=$default_singularity_dir
 log_label_raw=$default_log_label_raw
 lock_timeout=$default_lock_timeout
 force_build=false
 
 usage() {
   cat >&2 <<EOF
-USAGE: $progname [-o singularity_image] [-c cache_dir] [-l log_label] [-t lock_timeout] [-f] [-h] docker_image
+USAGE: $progname [-o singularity_image] [-c singularity_dir] [-l log_label] [-t lock_timeout] [-f] [-h] docker_image
 Pull a singularity container
 
--o <singularity_image> : Path to the singularity image to create. Default: "<cache_dir>/<docker_image>.sif"
--c <cache_dir>         : Directory to cache downloaded docker images. Default: "$default_cache_dir".
+-o <singularity_image> : Path to the singularity image to create. Default: "<singularity_dir>/<docker_image>.sif"
+-c <singularity_dir>   : Parent directory to download and cache docker images. Default: "$default_singularity_dir".
 -l <log_label>         : A label to use for logging. Default: "$default_log_label_raw".
 -t <lock_timeout>      : Timeout in seconds for acquiring a cache directory lock. Default: "$default_lock_timeout".
 -f                     : Force a rebuild of the singularity image file.
@@ -76,7 +76,7 @@ EOF
 while getopts ":o:c:l:t:fh" options; do
   case $options in
     o) singularity_image=$OPTARG;;
-    c) cache_dir=$OPTARG;;
+    c) singularity_dir=$OPTARG;;
     l) log_label_raw=$OPTARG;;
     t) lock_timeout=$OPTARG;;
     f) force_build=true;;
@@ -97,19 +97,21 @@ fi
 shift 1
 
 # Ensure the images for the dropseqgrp are shared.
-if [[ "$cache_dir" == "$default_cache_dir_dropseqgrp" ]]; then
+if [[ "$singularity_dir" == "$default_singularity_dir_dropseqgrp" ]]; then
   # The images may be shared, singularity cannot stop that.
-  image_dir=$default_cache_dir_dropseqgrp
+  image_dir=$default_singularity_dir_dropseqgrp/images
   # However, the directory for caching blobs must contain a directory ONLY owned by the user,
   # which will be forcefully set to chmod 700. This limitation is forced by this code block:
   # https://github.com/sylabs/singularity/commit/2cda4981812c29f0fb11d3ea6aaf6139f665a631#diff-759d5ff855d91f9b3f1fad705a86e1e5a50733cc9103dee5084b611647ed5d7fR303-R314
-  blob_dir=$default_cache_dir_dropseqgrp/caches/$USER
-  # Temporary files that aren't reused bas still be written elsewhere.
-  tmp_dir=$default_cache_dir_user/tmp
+  blob_dir=$default_singularity_dir_dropseqgrp/caches/$USER
+  # Temporary files that aren't reused may still be written elsewhere.
+  tmp_dir=$default_singularity_dir_user/tmp
+  log_dir=$default_singularity_dir_dropseqgrp/logs
 else
-  image_dir=$cache_dir
-  blob_dir=$cache_dir
-  tmp_dir=$cache_dir/tmp
+  image_dir=$singularity_dir/images
+  blob_dir=$singularity_dir/caches
+  tmp_dir=$singularity_dir/tmp
+  log_dir=$singularity_dir/logs
 fi
 
 if [[ -z "$singularity_image" ]]; then
@@ -123,15 +125,16 @@ fi
 cache_lock="$blob_dir/cache.lock"
 
 # Write the build logs to a shared file.
-build_log="$image_dir/build.log"
+build_log="$log_dir/build.log"
 
 # Ensure two processes don't try to write to the build log at the same time.
 build_log_lock="${build_log}.lock"
 
-mk_cache_dirs() {
+mk_singularity_dirs() {
   mkdir -p "$image_dir"
   mkdir -p "$blob_dir"
   mkdir -p "$tmp_dir"
+  mkdir -p "$log_dir"
 }
 
 log_msg() {
@@ -210,16 +213,13 @@ pull_image() {
 
       mv "$singularity_image.tmp" "$singularity_image"
 
-      # Undo singularity's chmod 700 mentioned above, ensuring the caches may be cleaned up by the dropseqgrp.
-      if [[ "$cache_dir" == "$default_cache_dir_dropseqgrp" ]]; then
+      if [[ "$singularity_dir" == "$default_singularity_dir_dropseqgrp" ]]; then
+        # Undo singularity's chmod 700 mentioned above, ensuring the caches may be cleaned up by the dropseqgrp.
         chgrp -R dropseqgrp "$blob_dir"
         chmod -R ug+rwX,o-rwx "$blob_dir"
-      fi
-
-      # Ensure the images for the dropseqgrp are shared.
-      if [[ "$(dirname "$singularity_image")" == "$default_cache_dir_dropseqgrp" ]]; then
-        chgrp -R dropseqgrp "$singularity_image"
-        chmod -R ug+rwX,o-rwx "$singularity_image"
+        # Ensure the images for the dropseqgrp are shared.
+        chgrp dropseqgrp "$singularity_image"
+        chmod ug+rwX,o-rwx "$singularity_image"
       fi
     fi
   ) 9>"$cache_lock"
@@ -227,10 +227,10 @@ pull_image() {
 }
 
 if [[ ! -e "$singularity_image" ]]; then
-  mk_cache_dirs
+  mk_singularity_dirs
   log_msg "INFO:    Image does not exist for $log_label at $(date): $singularity_image"
   pull_image
 elif [[ "$force_build" == true ]]; then
-  mk_cache_dirs
+  mk_singularity_dirs
   pull_image
 fi
