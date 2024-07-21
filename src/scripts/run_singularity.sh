@@ -49,8 +49,10 @@ get_default_singularity_dir() {
 default_singularity_dir=$(get_default_singularity_dir)
 default_log_label_raw="$USER@$HOSTNAME"
 default_lock_timeout=$((90 * 60))
+default_singularity_home=$HOME
 
 bind_autofs=
+singularity_home=$default_singularity_home
 singularity_binds=
 singularity_args=
 singularity_dir=$default_singularity_dir
@@ -64,6 +66,7 @@ Run a singularity container
 
 -a                     : Mount all existing autofs mounts into the container as read-write.
 -r                     : Mount all existing autofs mounts into the container as read-only.
+-H <singularity_home>  : Home directory to use in the container. Default: "$default_singularity_home", not auto mounted.
 -b <singularity_mount> : Custom bind path spec in the format src[:dest[:opts]].
 -s <singularity_args>  : A space separated string of arguments to pass to singularity. Default: "".
 -c <singularity_dir>   : Parent directory to download and cache docker images. Default: "$default_singularity_dir".
@@ -77,18 +80,22 @@ EOF
 }
 
 make_autofs_binds() {
-  mount_option=$1
+  exclude_dir="^/proc/"
   # Do not mount /home, as users home directories often get searched for packages that are not in the container.
-  awk '$3 == "autofs" {print $2}' /etc/mtab \
-  | grep -v '^/proc/' \
-  | grep -v '^/home$' \
-  | awk '{print "--bind "$1":"$1":'"$mount_option"'"}'
+  [[ "$singularity_home" == "$default_singularity_home" ]] && exclude_dir+="|^/home$"
+
+  awk \
+    -v exclude="$exclude_dir" \
+    -v mode="$bind_autofs" \
+    '$3 == "autofs" && $2 !~ exclude {print "--bind "$2":"$2":"mode}' \
+    /etc/mtab
 }
 
-while getopts ":arb:s:c:l:t:h" options; do
+while getopts ":arb:H:s:c:l:t:h" options; do
   case $options in
     a) bind_autofs=rw;;
     r) bind_autofs=ro;;
+    H) singularity_home=$OPTARG;;
     b) singularity_binds="$singularity_binds --bind $OPTARG";;
     s) singularity_args=$OPTARG;;
     c) singularity_dir=$OPTARG;;
@@ -129,12 +136,18 @@ singularity_image="$singularity_dir/images/$docker_name.sif"
   -t "$lock_timeout" \
   "$docker_image"
 
+singularity_home_arg=
+if [[ "$singularity_home" != "$default_singularity_home" ]]; then
+  singularity_home_arg="--home $singularity_home"
+fi
+
 # shellcheck disable=SC2046
 # shellcheck disable=SC2086
 singularity exec \
    --containall \
    --cleanenv \
-   $(if [[ -n $bind_autofs ]]; then make_autofs_binds $bind_autofs; fi) \
+   $singularity_home_arg \
+   $(if [[ -n $bind_autofs ]]; then make_autofs_binds; fi) \
    $singularity_binds \
    $singularity_args \
   "$singularity_image" \
