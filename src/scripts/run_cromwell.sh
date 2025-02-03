@@ -34,17 +34,35 @@ cd "$(dirname "$0")/.."
 root_dir=$(pwd)
 cromwell_jar="${root_dir}/bin/cromwell.jar"
 cromwell_conf="${root_dir}/conf/cromwell.conf"
+cloudsdk_auth_credentials_conf="${root_dir}/conf/cloudsdk_auth_credential.json"
 logback_xml="${root_dir}/conf/logback.xml"
 
 # Add Google-Cloud-SDK for docker-credential-gcloud.
 # Add UGER for qsub.
 set +eu
 source /broad/software/scripts/useuse
-unuse -q Google-Cloud-SDK
+unuse -q /broad/mccarroll/software/google-cloud-sdk
 unuse -q UGER
-use -q Google-Cloud-SDK
+use -q /broad/mccarroll/software/google-cloud-sdk
 use -q UGER
 set -eu
+
+# This file is used via the gcloud cli environment variable CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE instead of
+# GOOGLE_APPLICATION_CREDENTIALS.
+#
+# via: https://serverfault.com/questions/848580/how-to-use-google-application-credentials-with-gcloud-on-a-server
+#
+# NOTE: This config json file is the same as the adc json, but adds the field token_uri.
+# Without it, gcloud complains that the service account json isn't valid.
+if [ -f "$cloudsdk_auth_credentials_conf" ]; then
+  # If the file is not mode 400, then exit with an error.
+  if [ "$(stat -c %a "$cloudsdk_auth_credentials_conf")" -ne 400 ]; then
+    echo "ERROR: $cloudsdk_auth_credentials_conf must be mode 400." >&2
+    echo "Please run: chmod 400 $cloudsdk_auth_credentials_conf" >&2
+    exit 1
+  fi
+  export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$cloudsdk_auth_credentials_conf"
+fi
 
 # Install SDKMAN via:
 #   - https://sdkman.io/install
@@ -59,7 +77,7 @@ set -u
 set -m
 set -x
 java \
-  -Xmx2g \
+  -Xmx4g \
   -Dconfig.file="$cromwell_conf" \
   -Dlogback.configurationFile="$logback_xml" \
   -jar "$cromwell_jar" \
