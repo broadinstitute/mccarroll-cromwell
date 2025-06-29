@@ -62,6 +62,10 @@ if [ -f "$cloudsdk_auth_credentials_conf" ]; then
     exit 1
   fi
   export CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE="$cloudsdk_auth_credentials_conf"
+  # Use the same conf as the application default credentials
+  # since the Batch backend is using ADC credentials to dispatch jobs by not passing in creds
+  # https://github.com/broadinstitute/cromwell/blob/90/supportedBackends/google/batch/src/main/scala/cromwell/backend/google/batch/GcpBatchBackendLifecycleActorFactory.scala#L103-L105
+  export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE"
 fi
 
 # Install SDKMAN via:
