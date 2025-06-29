@@ -70,7 +70,7 @@ fi
 export SDKMAN_DIR="/broad/mccarroll/software/sdkman"
 set +u
 source "$SDKMAN_DIR/bin/sdkman-init.sh"
-sdk use java 11.0.15-tem
+sdk use java 21-tem
 set -u
 
 # enable job control so that kill -INT can be sent to java process
