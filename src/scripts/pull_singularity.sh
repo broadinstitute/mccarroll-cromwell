@@ -151,12 +151,12 @@ pull_image() {
   if [[ $(realpath "$(which singularity)") == */apptainer ]]; then
     # Apptainer emits warnings if it finds the SINGULARITY_TMPDIR variable.
     export APPTAINER_CACHEDIR=$blob_dir
-    export SINGULARITY_CACHEDIR=$blob_dir
     export APPTAINER_TMPDIR=$tmp_dir
   else
-    export SINGULARITY_CACHEDIR=$blob_dir
     export SINGULARITY_TMPDIR=$tmp_dir
   fi
+  export SINGULARITY_CACHEDIR=$blob_dir
+  export PROOT_TMP_DIR=$tmp_dir
 
   log_msg "INFO:    $log_label waiting for lock up to $lock_timeout seconds from $(date)"
   printf "INFO:    View build logs at %s\n" "$build_log" >&2
