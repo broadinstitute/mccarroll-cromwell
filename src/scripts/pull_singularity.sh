@@ -215,11 +215,11 @@ pull_image() {
 
       if [[ "$singularity_dir" == "$default_singularity_dir_dropseqgrp" ]]; then
         # Undo singularity's chmod 700 mentioned above, ensuring the caches may be cleaned up by the dropseqgrp.
-        chgrp -R dropseqgrp "$blob_dir"
-        chmod -R ug+rwX,o-rwx "$blob_dir"
+        chgrp -R dropseqgrp "$blob_dir" || true
+        chmod -R ug+rwX,o-rwx "$blob_dir" || true
         # Ensure the images for the dropseqgrp are shared.
-        chgrp dropseqgrp "$singularity_image"
-        chmod ug+rwX,o-rwx "$singularity_image"
+        chgrp dropseqgrp "$singularity_image" || true
+        chmod ug+rwX,o-rwx "$singularity_image" || true
       fi
     fi
   ) 9>"$cache_lock"
